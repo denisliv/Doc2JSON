@@ -192,6 +192,10 @@ class Pipeline:
         return body
 
     async def outlet(self, body: dict, user: Optional[dict] = None) -> dict:
+        """Удаляет оставшиеся временные PDF (если pipe не вызвался или не дошёл до finally)."""
+        for p in body.get("_doc2json_pdf_paths") or []:
+            Path(p).unlink(missing_ok=True)
+        body.pop("_doc2json_pdf_paths", None)
         return body
 
     def pipe(
