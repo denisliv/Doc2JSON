@@ -5,8 +5,12 @@ from pydantic import BaseModel, Field
 
 
 class BalanceHeadTable(BaseModel):
-    organization: Optional[str] = Field(None, alias="Организация", description="Название организации")
-    taxpayer_id: Optional[int] = Field(None, alias="Учетный номер плательщика", description="Учетный номер плательщика")
+    organization: Optional[str] = Field(
+        None, alias="Организация", description="Название организации"
+    )
+    taxpayer_id: Optional[int] = Field(
+        None, alias="Учетный номер плательщика", description="Учетный номер плательщика"
+    )
     economic_activity: Optional[str] = Field(
         None,
         alias="Вид экономической деятельности",
@@ -17,8 +21,12 @@ class BalanceHeadTable(BaseModel):
         alias="Организационно-правовая форма",
         description="Организационно-правовая форма",
     )
-    governing_body: Optional[str] = Field(None, alias="Орган управления", description="Орган управления")
-    unit: Optional[str] = Field(None, alias="Единица измерения", description="Единица измерения")
+    governing_body: Optional[str] = Field(
+        None, alias="Орган управления", description="Орган управления"
+    )
+    unit: Optional[str] = Field(
+        None, alias="Единица измерения", description="Единица измерения"
+    )
     address: Optional[str] = Field(None, alias="Адрес", description="Адрес")
 
 
@@ -28,8 +36,12 @@ class BalanceDatesTable(BaseModel):
         alias="Дата утверждения",
         description="Дата утверждения в формате ДД.ММ.ГГГГ",
     )
-    submission_date: Optional[str] = Field(None, alias="Дата отправки", description="Дата отправки в формате ДД.ММ.ГГГГ")
-    acceptance_date: Optional[str] = Field(None, alias="Дата принятия", description="Дата принятия в формате ДД.ММ.ГГГГ")
+    submission_date: Optional[str] = Field(
+        None, alias="Дата отправки", description="Дата отправки в формате ДД.ММ.ГГГГ"
+    )
+    acceptance_date: Optional[str] = Field(
+        None, alias="Дата принятия", description="Дата принятия в формате ДД.ММ.ГГГГ"
+    )
 
 
 class BalanceMainTable(BaseModel):
@@ -741,3 +753,26 @@ class ParsedPDF(BaseModel):
 
 output_parser = PydanticOutputParser(pydantic_object=ParsedPDF)
 format_instructions = output_parser.get_format_instructions()
+
+REQUIRED_TABLES_KEYS = [
+    "balance_head_table",
+    "balance_dates_table",
+    "balance_main_table_dates",
+    "balance_main_table",
+    "report_main_table",
+]
+
+
+def enrich_json(input_json_str):
+    """Добавляет к ответу LLM поля message (OK/Missing по ключам) и xlsx=None."""
+    import json
+
+    if isinstance(input_json_str, str):
+        data = json.loads(input_json_str)
+    else:
+        data = input_json_str.copy()
+
+    tables_data = data.get("tables_data", {})
+    message = {key: "OK" if key in tables_data else "Missing" for key in REQUIRED_TABLES_KEYS}
+
+    return {"message": message, "xlsx": None, **data}
