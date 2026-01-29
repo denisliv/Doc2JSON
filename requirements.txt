@@ -1,0 +1,9 @@
+aiohttp==3.13.3
+beautifulsoup4==4.14.3
+langchain==1.2.7
+langchain-openai==1.1.7
+
+pydantic==2.12.5
+
+paddlepaddle==3.2.2
+paddleocr==3.3.2

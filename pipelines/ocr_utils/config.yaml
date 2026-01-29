@@ -1,0 +1,29 @@
+# LLM configs
+llm_api_url: "http://host.docker.internal:11434/v1"
+llm_api_key: "token-abc"
+llm_model_name: "gpt-oss:20b-new"
+temperature: 0.0
+top_p: 0.8
+max_tokens: 4096
+reasoning_effort: "low"
+timeout: 60
+
+# PaddleOCRVL configs
+vl_rec_backend: "vllm-server"
+vl_rec_server_url: "http://paddleocr:8118/v1"
+vl_rec_model_name: "PaddleOCR-VL-0.9B"
+layout_detection_model_name: "PP-DocLayoutV2"
+layout_detection_model_dir: "pipelines/PP-DocLayoutV2"
+doc_orientation_classify_model_name: "PP-LCNet_x1_0_doc_ori"
+doc_orientation_classify_model_dir: "pipelines/PP-LCNet_x1_0_doc_ori"
+use_doc_orientation_classify: True
+use_doc_unwarping: False
+use_layout_detection: True
+layout_threshold: 0.5
+layout_nms: True
+layout_unclip_ratio: [1.1, 1.0]
+layout_merge_bboxes_mode: "union"
+
+# OpenWebUI configs
+openwebui_host: "http://open-webui:8080"
+openwebui_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImU1ODI1ZGYzLWJlMDYtNDZiMS05ZmM0LTdjMzM0Y2EyNGZjYyIsImV4cCI6MTc3MDI4NjExMSwianRpIjoiYWY5ZmU5MjUtNjljNC00ZmM0LThhMzEtYTVkOWUyNzliYjc0In0.ThAFVp7XstVRipJkAM5JW15uBB5wPQkwmGl7cZANsCw"
