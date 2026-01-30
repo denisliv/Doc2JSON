@@ -9,14 +9,23 @@ pipelines_dir = os.path.dirname(os.path.abspath(__file__))
 if pipelines_dir not in sys.path:
     sys.path.insert(0, pipelines_dir)
 
+from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from ocr_utils.config import AppConfig
 from ocr_utils.file_utils import download_pdfs_to_temp_paths
 from ocr_utils.markdown_utils import html_to_markdown_with_tables
-from ocr_utils.prompts import PROMPT_TEMPLATE
-from ocr_utils.schemas import enrich_json, format_instructions, output_parser
+from ocr_utils.models import AccountingStatements
+from ocr_utils.prompts import (
+    ACCOUNTING_STATEMENTS_SYSTEM_PROMPT,
+    ACCOUNTING_STATEMENTS_USER_PROMPT,
+    FIX_JSON_SYSTEM_PROMPT,
+    FIX_JSON_USER_PROMPT,
+    OFFICIAL_COMMUNICATIONS_SYSTEM_PROMPT,
+    OFFICIAL_COMMUNICATIONS_USER_PROMPT,
+)
 from ocr_utils.text_utils import (
+    enrich_json,
     remove_parentheses_around_numbers,
     truncate_after_diluted_eps,
 )
@@ -29,7 +38,9 @@ logger.setLevel(logging.INFO)
 
 if not logger.handlers:
     handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(asctime)s] %(levelname)s in %(name)s: %(message)s")
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(levelname)s in %(name)s: %(message)s"
+    )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
@@ -56,17 +67,46 @@ class Pipeline:
         self.llm = None
         self.paddle = None
 
+        self.output_parser = PydanticOutputParser(pydantic_object=AccountingStatements)
+        self.format_instructions = self.output_parser.get_format_instructions()
+        self.prompt_template = ChatPromptTemplate.from_messages(
+            [
+                ("system", ACCOUNTING_STATEMENTS_SYSTEM_PROMPT),
+                ("user", ACCOUNTING_STATEMENTS_USER_PROMPT),
+            ]
+        )
+        self.fix_prompt_template = ChatPromptTemplate.from_messages(
+            [("system", FIX_JSON_SYSTEM_PROMPT), ("user", FIX_JSON_USER_PROMPT)]
+        )
+        self.official_communications_prompt_template = ChatPromptTemplate.from_messages(
+            [
+                ("system", OFFICIAL_COMMUNICATIONS_SYSTEM_PROMPT),
+                ("user", OFFICIAL_COMMUNICATIONS_USER_PROMPT),
+            ]
+        )
         self.valves = self.Valves(
             **{
                 "pipelines": ["*"],
                 "LLM_API_URL": os.getenv("LLM_API_URL", self.config.llm_api_url),
                 "LLM_API_KEY": os.getenv("LLM_API_KEY", self.config.llm_api_key),
-                "LLM_MODEL_NAME": os.getenv("LLM_MODEL_NAME", self.config.llm_model_name),
-                "VL_REC_BACKEND": os.getenv("VL_REC_BACKEND", self.config.vl_rec_backend),
-                "VL_REC_SERVER_URL": os.getenv("VL_REC_SERVER_URL", self.config.vl_rec_server_url),
-                "VL_REC_MODEL_NAME": os.getenv("VL_REC_MODEL_NAME", self.config.vl_rec_model_name),
-                "OPENWEBUI_HOST": os.getenv("OPENWEBUI_HOST", self.config.openwebui_host),
-                "OPENWEBUI_API_KEY": os.getenv("OPENWEBUI_API_KEY", self.config.openwebui_token),
+                "LLM_MODEL_NAME": os.getenv(
+                    "LLM_MODEL_NAME", self.config.llm_model_name
+                ),
+                "VL_REC_BACKEND": os.getenv(
+                    "VL_REC_BACKEND", self.config.vl_rec_backend
+                ),
+                "VL_REC_SERVER_URL": os.getenv(
+                    "VL_REC_SERVER_URL", self.config.vl_rec_server_url
+                ),
+                "VL_REC_MODEL_NAME": os.getenv(
+                    "VL_REC_MODEL_NAME", self.config.vl_rec_model_name
+                ),
+                "OPENWEBUI_HOST": os.getenv(
+                    "OPENWEBUI_HOST", self.config.openwebui_host
+                ),
+                "OPENWEBUI_API_KEY": os.getenv(
+                    "OPENWEBUI_API_KEY", self.config.openwebui_token
+                ),
             }
         )
 
@@ -108,18 +148,8 @@ class Pipeline:
 
     def _fix_json_with_llm(self, broken_json_text: str) -> str:
         """Просит LLM исправить невалидный JSON по format_instructions."""
-        system_fix = """
-        Ты AI помощник, который исправляет JSON.
-        Верни **только валидный JSON**, строго соответствующий Pydantic-схеме.
-        {format_instructions}
-        """
-        user_fix = """
-        Исправь этот текст так, чтобы результат был корректным JSON:
-        {broken_json_text}
-        """
-        fix_template = ChatPromptTemplate.from_messages([("system", system_fix), ("user", user_fix)])
-        messages = fix_template.format_messages(
-            format_instructions=format_instructions,
+        messages = self.fix_prompt_template.format_messages(
+            format_instructions=self.format_instructions,
             broken_json_text=broken_json_text,
         )
         resp = self.llm.invoke(messages)
@@ -127,17 +157,17 @@ class Pipeline:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
     def _call_llm_and_parse(self, messages):
-        """Вызов LLM, парсинг в ParsedPDF; при ошибке — попытка починить JSON через LLM и повторить парсинг."""
+        """Вызов LLM, парсинг; при ошибке — попытка починить JSON через LLM и повторить парсинг."""
         result = self.llm.invoke(messages)
         raw_text = result.content
 
         try:
-            return output_parser.parse(raw_text)
+            return self.output_parser.parse(raw_text)
         except Exception as e:
             logger.warning("Primary parse failed, attempting JSON repair: %s", e)
             fixed_json = self._fix_json_with_llm(raw_text)
             try:
-                return output_parser.parse(fixed_json)
+                return self.output_parser.parse(fixed_json)
             except Exception as e2:
                 logger.exception("JSON repair also failed: %s", e2)
                 raise
@@ -145,10 +175,14 @@ class Pipeline:
     async def inlet(self, body: dict, user: dict) -> dict:
         """
         Скачивает PDF из body["files"] во временные файлы и кладёт пути в body["_doc2json_pdf_paths"].
-        В pipe файлы не приходят — только то, что подготовлено здесь.
         """
         files = body.get("files", []) or []
-        pdf_files = [f for f in files if (f.get("file") or {}).get("meta", {}).get("content_type") == "application/pdf"]
+        pdf_files = [
+            f
+            for f in files
+            if (f.get("file") or {}).get("meta", {}).get("content_type")
+            == "application/pdf"
+        ]
         file_list = [
             {
                 "url": f["url"],
@@ -192,7 +226,7 @@ class Pipeline:
 
         temp_paths = body.get("_doc2json_pdf_paths") or []
         if not temp_paths:
-            return "Прикрепите файл."
+            return "Файл не найден. Прикрепите, пожалуйста, pdf файл."
 
         all_markdown_list = []
         try:
@@ -204,13 +238,15 @@ class Pipeline:
 
             final_markdown = self.paddle.concatenate_markdown_pages(all_markdown_list)
             markdown_result = html_to_markdown_with_tables(final_markdown)
-            markdown_result = truncate_after_diluted_eps(remove_parentheses_around_numbers(markdown_result))
+            markdown_result = truncate_after_diluted_eps(
+                remove_parentheses_around_numbers(markdown_result)
+            )
         finally:
             for p in temp_paths:
                 Path(p).unlink(missing_ok=True)
 
-        messages_for_llm = PROMPT_TEMPLATE.format_messages(
-            format_instructions=format_instructions,
+        messages_for_llm = self.prompt_template.format_messages(
+            format_instructions=self.format_instructions,
             report=markdown_result,
         )
 

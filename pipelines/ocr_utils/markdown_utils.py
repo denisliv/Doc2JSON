@@ -2,7 +2,15 @@ from bs4 import BeautifulSoup
 
 
 def simple_html_table_to_markdown(table) -> str:
-    """Преобразует HTML-таблицу (BeautifulSoup Tag) в Markdown."""
+    """
+    Преобразует HTML-таблицу (BeautifulSoup Tag) в Markdown.
+
+    Args:
+        table: Элемент BeautifulSoup (Tag) с таблицей
+
+    Returns:
+        Строка таблицы в формате Markdown
+    """
     rows = []
     for tr in table.find_all("tr"):
         cells = tr.find_all(["td", "th"])
@@ -28,7 +36,15 @@ def simple_html_table_to_markdown(table) -> str:
 
 
 def html_to_markdown_with_tables(html: str) -> str:
-    """Преобразует HTML-строку в Markdown: таблицы — в markdown-таблицы, остальное — в текст."""
+    """
+    Преобразует HTML-строку в Markdown: таблицы — в markdown-таблицы, остальное — в текст.
+
+    Args:
+        html: Исходная HTML-строка
+
+    Returns:
+        Строка в формате Markdown
+    """
     soup = BeautifulSoup(html, "html.parser")
     output = []
 

@@ -1,7 +1,14 @@
+"""
+Pydantic-модели для извлечения данных из форм бухгалтерской отчётности (баланс + отчёт о прибылях и убытках).
+"""
+
 from typing import List, Optional
 
-from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
+
+# ============================================================================
+# Бухгалтерский баланс
+# ============================================================================
 
 
 class BalanceHeadTable(BaseModel):
@@ -474,6 +481,11 @@ class BalanceMainTable(BaseModel):
     )
 
 
+# ============================================================================
+# Отчёт о прибылях и убытках
+# ============================================================================
+
+
 class ReportMainTable(BaseModel):
     code_010: List[Optional[int]] = Field(
         default_factory=lambda: [None, None],
@@ -736,6 +748,11 @@ class ReportMainTable(BaseModel):
     )
 
 
+# ============================================================================
+# Агрегация: ParsedPDF
+# ============================================================================
+
+
 class TablesData(BaseModel):
     balance_head_table: BalanceHeadTable
     balance_dates_table: BalanceDatesTable
@@ -747,34 +764,5 @@ class TablesData(BaseModel):
     report_main_table: ReportMainTable
 
 
-class ParsedPDF(BaseModel):
+class AccountingStatements(BaseModel):
     tables_data: TablesData
-
-
-output_parser = PydanticOutputParser(pydantic_object=ParsedPDF)
-format_instructions = output_parser.get_format_instructions()
-
-REQUIRED_TABLES_KEYS = [
-    "balance_head_table",
-    "balance_dates_table",
-    "balance_main_table_dates",
-    "balance_main_table",
-    "report_main_table",
-]
-
-
-def enrich_json(input_json_str):
-    """Добавляет к ответу LLM поля message (OK/Missing по ключам) и xlsx=None."""
-    import json
-
-    if isinstance(input_json_str, str):
-        data = json.loads(input_json_str)
-    else:
-        data = input_json_str.copy()
-
-    tables_data = data.get("tables_data", {})
-    message = {
-        key: "OK" if key in tables_data else "Missing" for key in REQUIRED_TABLES_KEYS
-    }
-
-    return {"message": message, "xlsx": None, **data}

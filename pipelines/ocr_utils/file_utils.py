@@ -29,7 +29,9 @@ async def download_file(url: str, headers: dict) -> bytes:
                 return content
             else:
                 error_text = await resp.text()
-                raise Exception(f"Failed to download file: HTTP {resp.status} – {error_text}")
+                raise Exception(
+                    f"Failed to download file: HTTP {resp.status} – {error_text}"
+                )
 
 
 async def download_pdf_to_temp_path(
@@ -39,7 +41,17 @@ async def download_pdf_to_temp_path(
 ) -> str:
     """
     Загружает PDF по URL и сохраняет во временный файл.
-    Возвращает путь к временному файлу (для передачи в PaddleOCRVL.predict).
+
+    Args:
+        url: URL файла для загрузки
+        headers: Словарь с HTTP заголовками, включая авторизацию
+        filename_hint: Подсказка имени файла для расширения
+
+    Returns:
+        Путь к временному файлу
+
+    Raises:
+        Exception: Если загрузка не удалась или не удалось записать файл
     """
     content = await download_file(url, headers)
     suffix = Path(filename_hint).suffix or ".pdf"
@@ -60,7 +72,17 @@ async def download_pdfs_to_temp_paths(
 ) -> list[str]:
     """
     Загружает список PDF-файлов по URL OpenWebUI и сохраняет во временные файлы.
-    Возвращает список путей к временным файлам (в том же порядке).
+
+    Args:
+        file_list: Список словарей с ключами url и name
+        openwebui_host: Базовый хост OpenWebUI
+        openwebui_token: Токен авторизации OpenWebUI
+
+    Returns:
+        Список путей к временным файлам
+
+    Raises:
+        Exception: Если загрузка хотя бы одного файла не удалась
     """
     if not openwebui_token:
         logger.warning("OPENWEBUI_API_KEY not set — skipping file download")
