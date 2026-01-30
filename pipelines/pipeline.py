@@ -12,7 +12,9 @@ logger.setLevel(logging.INFO)
 
 if not logger.handlers:
     handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(asctime)s] %(levelname)s in %(name)s: %(message)s")
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(levelname)s in %(name)s: %(message)s"
+    )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
@@ -77,19 +79,33 @@ class Pipeline:
         # Кэш URL загруженных файлов по (user_id, chat_id)
         self._file_cache = {}
 
-        self.accounting_output_parser = PydanticOutputParser(pydantic_object=AccountingStatementsModel)
-        self.accounting_format_instructions = self.accounting_output_parser.get_format_instructions()
-        self.official_output_parser = PydanticOutputParser(pydantic_object=OfficialRequestModel)
-        self.official_format_instructions = self.official_output_parser.get_format_instructions()
-        self.router_output_parser = PydanticOutputParser(pydantic_object=RouterResponseModel)
-        self.router_format_instructions = self.router_output_parser.get_format_instructions()
+        self.accounting_output_parser = PydanticOutputParser(
+            pydantic_object=AccountingStatementsModel
+        )
+        self.accounting_format_instructions = (
+            self.accounting_output_parser.get_format_instructions()
+        )
+        self.official_output_parser = PydanticOutputParser(
+            pydantic_object=OfficialRequestModel
+        )
+        self.official_format_instructions = (
+            self.official_output_parser.get_format_instructions()
+        )
+        self.router_output_parser = PydanticOutputParser(
+            pydantic_object=RouterResponseModel
+        )
+        self.router_format_instructions = (
+            self.router_output_parser.get_format_instructions()
+        )
         self.accounting_prompt_template = ChatPromptTemplate.from_messages(
             [
                 ("system", ACCOUNTING_STATEMENTS_SYSTEM_PROMPT),
                 ("user", ACCOUNTING_STATEMENTS_USER_PROMPT),
             ]
         )
-        self.fix_prompt_template = ChatPromptTemplate.from_messages([("system", FIX_JSON_SYSTEM_PROMPT), ("user", FIX_JSON_USER_PROMPT)])
+        self.fix_prompt_template = ChatPromptTemplate.from_messages(
+            [("system", FIX_JSON_SYSTEM_PROMPT), ("user", FIX_JSON_USER_PROMPT)]
+        )
         self.official_request_prompt_template = ChatPromptTemplate.from_messages(
             [
                 ("system", OFFICIAL_REQUEST_SYSTEM_PROMPT),
@@ -107,12 +123,24 @@ class Pipeline:
                 "pipelines": ["*"],
                 "LLM_API_URL": os.getenv("LLM_API_URL", self.config.llm_api_url),
                 "LLM_API_KEY": os.getenv("LLM_API_KEY", self.config.llm_api_key),
-                "LLM_MODEL_NAME": os.getenv("LLM_MODEL_NAME", self.config.llm_model_name),
-                "VL_REC_BACKEND": os.getenv("VL_REC_BACKEND", self.config.vl_rec_backend),
-                "VL_REC_SERVER_URL": os.getenv("VL_REC_SERVER_URL", self.config.vl_rec_server_url),
-                "VL_REC_MODEL_NAME": os.getenv("VL_REC_MODEL_NAME", self.config.vl_rec_model_name),
-                "OPENWEBUI_HOST": os.getenv("OPENWEBUI_HOST", self.config.openwebui_host),
-                "OPENWEBUI_API_KEY": os.getenv("OPENWEBUI_API_KEY", self.config.openwebui_token),
+                "LLM_MODEL_NAME": os.getenv(
+                    "LLM_MODEL_NAME", self.config.llm_model_name
+                ),
+                "VL_REC_BACKEND": os.getenv(
+                    "VL_REC_BACKEND", self.config.vl_rec_backend
+                ),
+                "VL_REC_SERVER_URL": os.getenv(
+                    "VL_REC_SERVER_URL", self.config.vl_rec_server_url
+                ),
+                "VL_REC_MODEL_NAME": os.getenv(
+                    "VL_REC_MODEL_NAME", self.config.vl_rec_model_name
+                ),
+                "OPENWEBUI_HOST": os.getenv(
+                    "OPENWEBUI_HOST", self.config.openwebui_host
+                ),
+                "OPENWEBUI_API_KEY": os.getenv(
+                    "OPENWEBUI_API_KEY", self.config.openwebui_token
+                ),
             }
         )
 
@@ -136,22 +164,36 @@ class Pipeline:
     async def on_shutdown(self):
         logger.info(f"{self.name} shutting down...")
 
-    def _fix_json_with_llm(self, broken_json_text: str, format_instructions: str, initial_error: str, max_attempts: int = 3) -> str:
+    def _fix_json_with_llm(
+        self,
+        broken_json_text: str,
+        format_instructions: str,
+        initial_error: str,
+        max_attempts: int = 3,
+        parser=None,
+    ) -> str:
         """Просит LLM исправить невалидный JSON по format_instructions."""
         current_text = broken_json_text
         last_error = initial_error
 
         for attempt in range(max_attempts):
             messages = self.fix_prompt_template.format_messages(
-                broken_json_text=current_text, format_instructions=format_instructions, error_message=last_error or "Неизвестная ошибка"
+                broken_json_text=current_text,
+                format_instructions=format_instructions,
+                error_message=last_error or "Неизвестная ошибка",
             )
             resp = self.llm.invoke(messages)
             candidate = resp.content.strip()
-
-            candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.MULTILINE)
+            candidate = re.sub(
+                r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.MULTILINE
+            )
+            candidate = candidate.strip()
 
             try:
-                json.loads(candidate)
+                if parser is not None:
+                    parser.parse(candidate)
+                else:
+                    json.loads(candidate)
                 return candidate
             except Exception as e:
                 last_error = f"Попытка {attempt + 1} неудачна. Ошибка: {str(e)}"
@@ -163,13 +205,20 @@ class Pipeline:
     def _call_llm_and_parse(self, messages, parser, format_instructions: str):
         result = self.llm.invoke(messages)
         raw_text = result.content
+        initial_parse_error: Optional[str] = None
 
         try:
             return parser.parse(raw_text)
         except Exception as e1:
+            initial_parse_error = str(e1)
             logger.warning("Primary parse failed: %s", e1)
 
-        fixed_json = self._fix_json_with_llm(broken_json_text=raw_text, format_instructions=format_instructions, initial_error=str(e1))
+        fixed_json = self._fix_json_with_llm(
+            broken_json_text=raw_text,
+            format_instructions=format_instructions,
+            initial_error=initial_parse_error or "Неизвестная ошибка",
+            parser=parser,
+        )
 
         try:
             return parser.parse(fixed_json)
@@ -188,7 +237,9 @@ class Pipeline:
             format_instructions=self.router_format_instructions,
             markdown_text=state["markdown_result"][:30000],
         )
-        parsed = self._call_llm_and_parse(messages, self.router_output_parser, self.router_format_instructions)
+        parsed = self._call_llm_and_parse(
+            messages, self.router_output_parser, self.router_format_instructions
+        )
         return {"route": parsed.route}
 
     def _accounting_node(self, state: Doc2JSONState) -> dict:
@@ -197,7 +248,9 @@ class Pipeline:
             format_instructions=self.accounting_format_instructions,
             report=state["markdown_result"],
         )
-        parsed = self._call_llm_and_parse(messages, self.accounting_output_parser, self.accounting_format_instructions)
+        parsed = self._call_llm_and_parse(
+            messages, self.accounting_output_parser, self.accounting_format_instructions
+        )
         data = parsed.model_dump(by_alias=True)
         result = enrich_json(data)
         json_str = json.dumps(result, ensure_ascii=False, indent=2)
@@ -209,14 +262,18 @@ class Pipeline:
             format_instructions=self.official_format_instructions,
             report=state["markdown_result"],
         )
-        parsed = self._call_llm_and_parse(messages, self.official_output_parser, self.official_format_instructions)
+        parsed = self._call_llm_and_parse(
+            messages, self.official_output_parser, self.official_format_instructions
+        )
         data = parsed.model_dump(by_alias=True)
         json_str = json.dumps(data, ensure_ascii=False, indent=2)
         return {"response": f"```json\n{json_str}\n```"}
 
     def _other_node(self, _state: Doc2JSONState) -> dict:
         """Узел «прочее»: документ не относится к бухотчётности и не к официальным запросам."""
-        return {"response": "Документ не относится к Бухгалтерской отчетности или официальным запросам"}
+        return {
+            "response": "Документ не относится к Бухгалтерской отчетности или официальным запросам"
+        }
 
     def _route_after_router(self, state: Doc2JSONState) -> str:
         """Условный переход после роутера: имя следующего узла."""
@@ -260,7 +317,12 @@ class Pipeline:
             self._file_cache[user_id][chat_id] = set()
 
         files = body.get("files", []) or []
-        pdf_files = [f for f in files if (f.get("file") or {}).get("meta", {}).get("content_type") == "application/pdf"]
+        pdf_files = [
+            f
+            for f in files
+            if (f.get("file") or {}).get("meta", {}).get("content_type")
+            == "application/pdf"
+        ]
         file_list_all = [
             {
                 "url": f["url"],
@@ -282,7 +344,9 @@ class Pipeline:
             names_new = [f["name"] for f in file_list_new]
             logger.info("Inlet: new files: %s", names_new)
         elif file_list_all:
-            logger.info("Inlet: all files are already in the cache, there are no new ones.")
+            logger.info(
+                "Inlet: all files are already in the cache, there are no new ones."
+            )
 
         body["_doc2json_pdf_paths"] = []
         if file_list_new:
@@ -354,7 +418,9 @@ class Pipeline:
 
             final_markdown = ocr.concatenate_markdown_pages(all_markdown_list)
             markdown_result = html_to_markdown_with_tables(final_markdown)
-            markdown_result = truncate_after_diluted_eps(remove_parentheses_around_numbers(markdown_result))
+            markdown_result = truncate_after_diluted_eps(
+                remove_parentheses_around_numbers(markdown_result)
+            )
         finally:
             del ocr
             gc.collect()
