@@ -12,17 +12,24 @@ if pipelines_dir not in sys.path:
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, StateGraph
 from ocr_utils.config import AppConfig
 from ocr_utils.file_utils import download_pdfs_to_temp_paths
 from ocr_utils.markdown_utils import html_to_markdown_with_tables
-from ocr_utils.models import AccountingStatements
+from ocr_utils.models import (
+    AccountingStatementsModel,
+    OfficialRequestModel,
+    RouterResponseModel,
+)
 from ocr_utils.prompts import (
     ACCOUNTING_STATEMENTS_SYSTEM_PROMPT,
     ACCOUNTING_STATEMENTS_USER_PROMPT,
     FIX_JSON_SYSTEM_PROMPT,
     FIX_JSON_USER_PROMPT,
-    OFFICIAL_COMMUNICATIONS_SYSTEM_PROMPT,
-    OFFICIAL_COMMUNICATIONS_USER_PROMPT,
+    OFFICIAL_REQUEST_SYSTEM_PROMPT,
+    OFFICIAL_REQUEST_USER_PROMPT,
+    ROUTER_SYSTEM_PROMPT,
+    ROUTER_USER_PROMPT,
 )
 from ocr_utils.text_utils import (
     enrich_json,
@@ -31,6 +38,7 @@ from ocr_utils.text_utils import (
 )
 from paddleocr import PaddleOCRVL
 from pydantic import BaseModel
+from state import Doc2JSONState
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 logger = logging.getLogger(__name__)
@@ -66,10 +74,29 @@ class Pipeline:
         self.config = AppConfig.from_yaml()
         self.llm = None
         self.paddle = None
+        self.graph = None
+        # Кэш URL загруженных файлов по (user_id, chat_id)
+        self._file_cache = {}
 
-        self.output_parser = PydanticOutputParser(pydantic_object=AccountingStatements)
-        self.format_instructions = self.output_parser.get_format_instructions()
-        self.prompt_template = ChatPromptTemplate.from_messages(
+        self.accounting_output_parser = PydanticOutputParser(
+            pydantic_object=AccountingStatementsModel
+        )
+        self.accounting_format_instructions = (
+            self.accounting_output_parser.get_format_instructions()
+        )
+        self.official_output_parser = PydanticOutputParser(
+            pydantic_object=OfficialRequestModel
+        )
+        self.official_format_instructions = (
+            self.official_output_parser.get_format_instructions()
+        )
+        self.router_output_parser = PydanticOutputParser(
+            pydantic_object=RouterResponseModel
+        )
+        self.router_format_instructions = (
+            self.router_output_parser.get_format_instructions()
+        )
+        self.accounting_prompt_template = ChatPromptTemplate.from_messages(
             [
                 ("system", ACCOUNTING_STATEMENTS_SYSTEM_PROMPT),
                 ("user", ACCOUNTING_STATEMENTS_USER_PROMPT),
@@ -78,10 +105,16 @@ class Pipeline:
         self.fix_prompt_template = ChatPromptTemplate.from_messages(
             [("system", FIX_JSON_SYSTEM_PROMPT), ("user", FIX_JSON_USER_PROMPT)]
         )
-        self.official_communications_prompt_template = ChatPromptTemplate.from_messages(
+        self.official_request_prompt_template = ChatPromptTemplate.from_messages(
             [
-                ("system", OFFICIAL_COMMUNICATIONS_SYSTEM_PROMPT),
-                ("user", OFFICIAL_COMMUNICATIONS_USER_PROMPT),
+                ("system", OFFICIAL_REQUEST_SYSTEM_PROMPT),
+                ("user", OFFICIAL_REQUEST_USER_PROMPT),
+            ]
+        )
+        self.router_prompt_template = ChatPromptTemplate.from_messages(
+            [
+                ("system", ROUTER_SYSTEM_PROMPT),
+                ("user", ROUTER_USER_PROMPT),
             ]
         )
         self.valves = self.Valves(
@@ -142,40 +175,125 @@ class Pipeline:
             timeout=self.config.timeout,
         )
         logger.info(f"LLM {self.valves.LLM_MODEL_NAME} started")
+        self._build_graph()
+        logger.info("LangGraph router compiled")
 
     async def on_shutdown(self):
         logger.info(f"{self.name} shutting down...")
 
-    def _fix_json_with_llm(self, broken_json_text: str) -> str:
+    def _fix_json_with_llm(
+        self,
+        broken_json_text: str,
+        format_instructions: str,
+    ) -> str:
         """Просит LLM исправить невалидный JSON по format_instructions."""
         messages = self.fix_prompt_template.format_messages(
-            format_instructions=self.format_instructions,
             broken_json_text=broken_json_text,
+            format_instructions=format_instructions,
         )
         resp = self.llm.invoke(messages)
         return resp.content
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
-    def _call_llm_and_parse(self, messages):
-        """Вызов LLM, парсинг; при ошибке — попытка починить JSON через LLM и повторить парсинг."""
+    def _call_llm_and_parse(self, messages, parser, format_instructions: str):
+        """Вызов LLM, парсинг через переданный parser; при ошибке — попытка починить JSON через LLM."""
         result = self.llm.invoke(messages)
         raw_text = result.content
 
         try:
-            return self.output_parser.parse(raw_text)
+            return parser.parse(raw_text)
         except Exception as e:
             logger.warning("Primary parse failed, attempting JSON repair: %s", e)
-            fixed_json = self._fix_json_with_llm(raw_text)
+            fixed_json = self._fix_json_with_llm(raw_text, format_instructions)
             try:
-                return self.output_parser.parse(fixed_json)
+                return parser.parse(fixed_json)
             except Exception as e2:
                 logger.exception("JSON repair also failed: %s", e2)
                 raise
+
+    def _router_node(self, state: Doc2JSONState) -> dict:
+        """Узел маршрутизации: LLM определяет категорию документа."""
+        messages = self.router_prompt_template.format_messages(
+            format_instructions=self.router_format_instructions,
+            markdown_text=state["markdown_result"][:30000],
+        )
+        parsed = self._call_llm_and_parse(
+            messages, self.router_output_parser, self.router_format_instructions
+        )
+        return {"route": parsed.route}
+
+    def _accounting_node(self, state: Doc2JSONState) -> dict:
+        """Узел бухгалтерской отчётности: LLM + валидация AccountingStatements → JSON."""
+        messages = self.accounting_prompt_template.format_messages(
+            format_instructions=self.accounting_format_instructions,
+            report=state["markdown_result"],
+        )
+        parsed = self._call_llm_and_parse(
+            messages, self.accounting_output_parser, self.accounting_format_instructions
+        )
+        data = parsed.model_dump(by_alias=True)
+        result = enrich_json(data)
+        json_str = json.dumps(result, ensure_ascii=False, indent=2)
+        return {"response": f"```json\n{json_str}\n```"}
+
+    def _official_request_node(self, state: Doc2JSONState) -> dict:
+        """Узел официальных запросов: LLM + валидация OfficialRequest → JSON."""
+        messages = self.official_request_prompt_template.format_messages(
+            format_instructions=self.official_format_instructions,
+            report=state["markdown_result"],
+        )
+        parsed = self._call_llm_and_parse(
+            messages, self.official_output_parser, self.official_format_instructions
+        )
+        data = parsed.model_dump(by_alias=True)
+        json_str = json.dumps(data, ensure_ascii=False, indent=2)
+        return {"response": f"```json\n{json_str}\n```"}
+
+    def _other_node(self, _state: Doc2JSONState) -> dict:
+        """Узел «прочее»: документ не относится к бухотчётности и не к официальным запросам."""
+        return {
+            "response": "Документ не относится к Бухгалтерской отчетности или официальным запросам"
+        }
+
+    def _route_after_router(self, state: Doc2JSONState) -> str:
+        """Условный переход после роутера: имя следующего узла."""
+        return state.get("route") or "other"
+
+    def _build_graph(self):
+        """Собирает LangGraph: START → router → accounting | official_request | other → END."""
+        builder = StateGraph(Doc2JSONState)
+        builder.add_node("router", self._router_node)
+        builder.add_node("accounting_statements", self._accounting_node)
+        builder.add_node("official_request", self._official_request_node)
+        builder.add_node("other", self._other_node)
+        builder.add_edge(START, "router")
+        builder.add_conditional_edges(
+            "router",
+            self._route_after_router,
+            {
+                "accounting_statements": "accounting_statements",
+                "official_request": "official_request",
+                "other": "other",
+            },
+        )
+        builder.add_edge("accounting_statements", END)
+        builder.add_edge("official_request", END)
+        builder.add_edge("other", END)
+        self.graph = builder.compile()
 
     async def inlet(self, body: dict, user: dict) -> dict:
         """
         Скачивает PDF из body["files"] во временные файлы и кладёт пути в body["_doc2json_pdf_paths"].
         """
+        metadata = body.get("metadata", {})
+        user_id = metadata.get("user_id")
+        chat_id = metadata.get("chat_id")
+
+        if user_id not in self._file_cache:
+            self._file_cache[user_id] = {}
+        if chat_id not in self._file_cache[user_id]:
+            self._file_cache[user_id][chat_id] = set()
+
         files = body.get("files", []) or []
         pdf_files = [
             f
@@ -183,7 +301,7 @@ class Pipeline:
             if (f.get("file") or {}).get("meta", {}).get("content_type")
             == "application/pdf"
         ]
-        file_list = [
+        file_list_all = [
             {
                 "url": f["url"],
                 "name": f.get("name", "unknown.pdf"),
@@ -192,23 +310,31 @@ class Pipeline:
             for f in pdf_files
             if f.get("url")
         ]
+
+        cached_urls = self._file_cache[user_id][chat_id]
+        file_list_new = [f for f in file_list_all if f["url"] not in cached_urls]
+
         body["_doc2json_pdf_paths"] = []
-        if file_list:
+        body["_doc2json_all_cached"] = bool(file_list_all and not file_list_new)
+        if file_list_new:
             try:
                 body["_doc2json_pdf_paths"] = await download_pdfs_to_temp_paths(
-                    file_list,
+                    file_list_new,
                     self.valves.OPENWEBUI_HOST,
                     self.valves.OPENWEBUI_API_KEY,
                 )
+                for f in file_list_new:
+                    cached_urls.add(f["url"])
             except Exception as e:
                 logger.exception("Failed to download PDFs in inlet: %s", e)
         return body
 
     async def outlet(self, body: dict, user: Optional[dict] = None) -> dict:
-        """Удаляет оставшиеся временные PDF (если pipe не вызвался или не дошёл до finally)."""
+        """Удаляет оставшиеся временные PDF."""
         for p in body.get("_doc2json_pdf_paths") or []:
             Path(p).unlink(missing_ok=True)
         body.pop("_doc2json_pdf_paths", None)
+        body.pop("_doc2json_all_cached", None)
         return body
 
     def pipe(
@@ -219,13 +345,14 @@ class Pipeline:
         body: dict,
     ) -> Union[str, dict]:
         """
-        Обработка запроса: PDF-пути берутся из body["_doc2json_pdf_paths"].
-        При отсутствии путей — «Прикрепите файл»; иначе PaddleOCRVL → markdown → LLM → enrich_json.
+        Обработка запроса: PDF-пути берутся из body["_doc2json_pdf_paths"] и обрабатываются PaddleOCRVL.
         """
         logger.info("Starting Doc2JSON pipeline")
 
         temp_paths = body.get("_doc2json_pdf_paths") or []
         if not temp_paths:
+            if body.get("_doc2json_all_cached"):
+                return "Все прикреплённые файлы уже были обработаны в этом чате ранее. Прикрепите новые PDF для разбора."
             return "Файл не найден. Прикрепите, пожалуйста, pdf файл."
 
         all_markdown_list = []
@@ -245,18 +372,21 @@ class Pipeline:
             for p in temp_paths:
                 Path(p).unlink(missing_ok=True)
 
-        messages_for_llm = self.prompt_template.format_messages(
-            format_instructions=self.format_instructions,
-            report=markdown_result,
-        )
+        if self.graph is None:
+            self._build_graph()
 
+        initial_state: Doc2JSONState = {
+            "markdown_result": markdown_result,
+            "route": None,
+            "response": None,
+        }
         try:
-            parsed = self._call_llm_and_parse(messages_for_llm)
-            data = parsed.model_dump(by_alias=True)
-            result = enrich_json(data)
+            final_state = self.graph.invoke(initial_state)
+            response = final_state.get("response")
+            if response is None:
+                return "Документ не относится к Бухгалтерской отчетности или официальным запросам"
             logger.info("Doc2JSON pipeline completed successfully")
-            json_str = json.dumps(result, ensure_ascii=False, indent=2)
-            return f"```json\n{json_str}\n```"
+            return response
         except Exception as e:
-            logger.exception("LLM/parse error: %s", e)
-            return f"Ошибка при разборе отчёта: {e}"
+            logger.exception("Pipeline/LLM error: %s", e)
+            return f"Ошибка при разборе документа: {e}"

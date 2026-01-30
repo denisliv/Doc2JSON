@@ -1,0 +1,27 @@
+from ocr_utils.prompts.accounting_statements import (
+    ACCOUNTING_STATEMENTS_SYSTEM_PROMPT,
+    ACCOUNTING_STATEMENTS_USER_PROMPT,
+)
+from ocr_utils.prompts.fix_json import (
+    FIX_JSON_SYSTEM_PROMPT,
+    FIX_JSON_USER_PROMPT,
+)
+from ocr_utils.prompts.official_request import (
+    OFFICIAL_REQUEST_SYSTEM_PROMPT,
+    OFFICIAL_REQUEST_USER_PROMPT,
+)
+from ocr_utils.prompts.router import (
+    ROUTER_SYSTEM_PROMPT,
+    ROUTER_USER_PROMPT,
+)
+
+__all__ = [
+    "ACCOUNTING_STATEMENTS_SYSTEM_PROMPT",
+    "ACCOUNTING_STATEMENTS_USER_PROMPT",
+    "FIX_JSON_SYSTEM_PROMPT",
+    "FIX_JSON_USER_PROMPT",
+    "OFFICIAL_REQUEST_SYSTEM_PROMPT",
+    "OFFICIAL_REQUEST_USER_PROMPT",
+    "ROUTER_SYSTEM_PROMPT",
+    "ROUTER_USER_PROMPT",
+]
