@@ -29,9 +29,7 @@ async def download_file(url: str, headers: dict) -> bytes:
                 return content
             else:
                 error_text = await resp.text()
-                raise Exception(
-                    f"Failed to download file: HTTP {resp.status} – {error_text}"
-                )
+                raise Exception(f"Failed to download file: HTTP {resp.status} – {error_text}")
 
 
 async def download_pdf_to_temp_path(
