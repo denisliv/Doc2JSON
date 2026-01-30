@@ -29,9 +29,7 @@ logger.setLevel(logging.INFO)
 
 if not logger.handlers:
     handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "[%(asctime)s] %(levelname)s in %(name)s: %(message)s"
-    )
+    formatter = logging.Formatter("[%(asctime)s] %(levelname)s in %(name)s: %(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
@@ -63,24 +61,12 @@ class Pipeline:
                 "pipelines": ["*"],
                 "LLM_API_URL": os.getenv("LLM_API_URL", self.config.llm_api_url),
                 "LLM_API_KEY": os.getenv("LLM_API_KEY", self.config.llm_api_key),
-                "LLM_MODEL_NAME": os.getenv(
-                    "LLM_MODEL_NAME", self.config.llm_model_name
-                ),
-                "VL_REC_BACKEND": os.getenv(
-                    "VL_REC_BACKEND", self.config.vl_rec_backend
-                ),
-                "VL_REC_SERVER_URL": os.getenv(
-                    "VL_REC_SERVER_URL", self.config.vl_rec_server_url
-                ),
-                "VL_REC_MODEL_NAME": os.getenv(
-                    "VL_REC_MODEL_NAME", self.config.vl_rec_model_name
-                ),
-                "OPENWEBUI_HOST": os.getenv(
-                    "OPENWEBUI_HOST", self.config.openwebui_host
-                ),
-                "OPENWEBUI_API_KEY": os.getenv(
-                    "OPENWEBUI_API_KEY", self.config.openwebui_token
-                ),
+                "LLM_MODEL_NAME": os.getenv("LLM_MODEL_NAME", self.config.llm_model_name),
+                "VL_REC_BACKEND": os.getenv("VL_REC_BACKEND", self.config.vl_rec_backend),
+                "VL_REC_SERVER_URL": os.getenv("VL_REC_SERVER_URL", self.config.vl_rec_server_url),
+                "VL_REC_MODEL_NAME": os.getenv("VL_REC_MODEL_NAME", self.config.vl_rec_model_name),
+                "OPENWEBUI_HOST": os.getenv("OPENWEBUI_HOST", self.config.openwebui_host),
+                "OPENWEBUI_API_KEY": os.getenv("OPENWEBUI_API_KEY", self.config.openwebui_token),
             }
         )
 
@@ -131,9 +117,7 @@ class Pipeline:
         Исправь этот текст так, чтобы результат был корректным JSON:
         {broken_json_text}
         """
-        fix_template = ChatPromptTemplate.from_messages(
-            [("system", system_fix), ("user", user_fix)]
-        )
+        fix_template = ChatPromptTemplate.from_messages([("system", system_fix), ("user", user_fix)])
         messages = fix_template.format_messages(
             format_instructions=format_instructions,
             broken_json_text=broken_json_text,
@@ -164,12 +148,7 @@ class Pipeline:
         В pipe файлы не приходят — только то, что подготовлено здесь.
         """
         files = body.get("files", []) or []
-        pdf_files = [
-            f
-            for f in files
-            if (f.get("file") or {}).get("meta", {}).get("content_type")
-            == "application/pdf"
-        ]
+        pdf_files = [f for f in files if (f.get("file") or {}).get("meta", {}).get("content_type") == "application/pdf"]
         file_list = [
             {
                 "url": f["url"],
@@ -206,7 +185,7 @@ class Pipeline:
         body: dict,
     ) -> Union[str, dict]:
         """
-        Обработка запроса: PDF-пути берутся из body["_doc2json_pdf_paths"] (подготовлены в inlet).
+        Обработка запроса: PDF-пути берутся из body["_doc2json_pdf_paths"].
         При отсутствии путей — «Прикрепите файл»; иначе PaddleOCRVL → markdown → LLM → enrich_json.
         """
         logger.info("Starting Doc2JSON pipeline")
@@ -225,9 +204,7 @@ class Pipeline:
 
             final_markdown = self.paddle.concatenate_markdown_pages(all_markdown_list)
             markdown_result = html_to_markdown_with_tables(final_markdown)
-            markdown_result = truncate_after_diluted_eps(
-                remove_parentheses_around_numbers(markdown_result)
-            )
+            markdown_result = truncate_after_diluted_eps(remove_parentheses_around_numbers(markdown_result))
         finally:
             for p in temp_paths:
                 Path(p).unlink(missing_ok=True)
@@ -242,7 +219,8 @@ class Pipeline:
             data = parsed.model_dump(by_alias=True)
             result = enrich_json(data)
             logger.info("Doc2JSON pipeline completed successfully")
-            return json.dumps(result, ensure_ascii=False, indent=2)
+            json_str = json.dumps(result, ensure_ascii=False, indent=2)
+            return f"```json\n{json_str}\n```"
         except Exception as e:
             logger.exception("LLM/parse error: %s", e)
             return f"Ошибка при разборе отчёта: {e}"

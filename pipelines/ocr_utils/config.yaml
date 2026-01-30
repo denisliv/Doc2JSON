@@ -10,7 +10,7 @@ timeout: 60
 
 # PaddleOCRVL configs
 vl_rec_backend: "vllm-server"
-vl_rec_server_url: "http://paddleocr:8118/v1"
+vl_rec_server_url: "http://host.docker.internal:8118/v1"
 vl_rec_model_name: "PaddleOCR-VL-0.9B"
 layout_detection_model_name: "PP-DocLayoutV2"
 layout_detection_model_dir: "pipelines/PP-DocLayoutV2"

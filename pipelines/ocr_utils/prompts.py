@@ -61,6 +61,4 @@ USER_PROMPT = """
 {report}
 """
 
-PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
-    [("system", SYSTEM_PROMPT), ("user", USER_PROMPT)]
-)
+PROMPT_TEMPLATE = ChatPromptTemplate.from_messages([("system", SYSTEM_PROMPT), ("user", USER_PROMPT)])
