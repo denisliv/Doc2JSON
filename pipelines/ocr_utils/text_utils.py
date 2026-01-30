@@ -18,9 +18,7 @@ def enrich_json(input_json_str):
         data = input_json_str.copy()
 
     tables_data = data.get("tables_data", {})
-    message = {
-        key: "OK" if key in tables_data else "Missing" for key in REQUIRED_TABLES_KEYS
-    }
+    message = {key: "OK" if key in tables_data else "Missing" for key in REQUIRED_TABLES_KEYS}
 
     return {"message": message, "xlsx": None, **data}
 
