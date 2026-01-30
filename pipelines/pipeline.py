@@ -5,6 +5,17 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Union
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(levelname)s in %(name)s: %(message)s"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
 pipelines_dir = os.path.dirname(os.path.abspath(__file__))
 if pipelines_dir not in sys.path:
     sys.path.insert(0, pipelines_dir)
@@ -41,15 +52,6 @@ from paddleocr import PaddleOCRVL
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(asctime)s] %(levelname)s in %(name)s: %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
 
 class Pipeline:
     """
@@ -76,19 +78,33 @@ class Pipeline:
         # Кэш URL загруженных файлов по (user_id, chat_id)
         self._file_cache = {}
 
-        self.accounting_output_parser = PydanticOutputParser(pydantic_object=AccountingStatementsModel)
-        self.accounting_format_instructions = self.accounting_output_parser.get_format_instructions()
-        self.official_output_parser = PydanticOutputParser(pydantic_object=OfficialRequestModel)
-        self.official_format_instructions = self.official_output_parser.get_format_instructions()
-        self.router_output_parser = PydanticOutputParser(pydantic_object=RouterResponseModel)
-        self.router_format_instructions = self.router_output_parser.get_format_instructions()
+        self.accounting_output_parser = PydanticOutputParser(
+            pydantic_object=AccountingStatementsModel
+        )
+        self.accounting_format_instructions = (
+            self.accounting_output_parser.get_format_instructions()
+        )
+        self.official_output_parser = PydanticOutputParser(
+            pydantic_object=OfficialRequestModel
+        )
+        self.official_format_instructions = (
+            self.official_output_parser.get_format_instructions()
+        )
+        self.router_output_parser = PydanticOutputParser(
+            pydantic_object=RouterResponseModel
+        )
+        self.router_format_instructions = (
+            self.router_output_parser.get_format_instructions()
+        )
         self.accounting_prompt_template = ChatPromptTemplate.from_messages(
             [
                 ("system", ACCOUNTING_STATEMENTS_SYSTEM_PROMPT),
                 ("user", ACCOUNTING_STATEMENTS_USER_PROMPT),
             ]
         )
-        self.fix_prompt_template = ChatPromptTemplate.from_messages([("system", FIX_JSON_SYSTEM_PROMPT), ("user", FIX_JSON_USER_PROMPT)])
+        self.fix_prompt_template = ChatPromptTemplate.from_messages(
+            [("system", FIX_JSON_SYSTEM_PROMPT), ("user", FIX_JSON_USER_PROMPT)]
+        )
         self.official_request_prompt_template = ChatPromptTemplate.from_messages(
             [
                 ("system", OFFICIAL_REQUEST_SYSTEM_PROMPT),
@@ -106,12 +122,24 @@ class Pipeline:
                 "pipelines": ["*"],
                 "LLM_API_URL": os.getenv("LLM_API_URL", self.config.llm_api_url),
                 "LLM_API_KEY": os.getenv("LLM_API_KEY", self.config.llm_api_key),
-                "LLM_MODEL_NAME": os.getenv("LLM_MODEL_NAME", self.config.llm_model_name),
-                "VL_REC_BACKEND": os.getenv("VL_REC_BACKEND", self.config.vl_rec_backend),
-                "VL_REC_SERVER_URL": os.getenv("VL_REC_SERVER_URL", self.config.vl_rec_server_url),
-                "VL_REC_MODEL_NAME": os.getenv("VL_REC_MODEL_NAME", self.config.vl_rec_model_name),
-                "OPENWEBUI_HOST": os.getenv("OPENWEBUI_HOST", self.config.openwebui_host),
-                "OPENWEBUI_API_KEY": os.getenv("OPENWEBUI_API_KEY", self.config.openwebui_token),
+                "LLM_MODEL_NAME": os.getenv(
+                    "LLM_MODEL_NAME", self.config.llm_model_name
+                ),
+                "VL_REC_BACKEND": os.getenv(
+                    "VL_REC_BACKEND", self.config.vl_rec_backend
+                ),
+                "VL_REC_SERVER_URL": os.getenv(
+                    "VL_REC_SERVER_URL", self.config.vl_rec_server_url
+                ),
+                "VL_REC_MODEL_NAME": os.getenv(
+                    "VL_REC_MODEL_NAME", self.config.vl_rec_model_name
+                ),
+                "OPENWEBUI_HOST": os.getenv(
+                    "OPENWEBUI_HOST", self.config.openwebui_host
+                ),
+                "OPENWEBUI_API_KEY": os.getenv(
+                    "OPENWEBUI_API_KEY", self.config.openwebui_token
+                ),
             }
         )
 
@@ -189,7 +217,9 @@ class Pipeline:
             format_instructions=self.router_format_instructions,
             markdown_text=state["markdown_result"][:30000],
         )
-        parsed = self._call_llm_and_parse(messages, self.router_output_parser, self.router_format_instructions)
+        parsed = self._call_llm_and_parse(
+            messages, self.router_output_parser, self.router_format_instructions
+        )
         return {"route": parsed.route}
 
     def _accounting_node(self, state: Doc2JSONState) -> dict:
@@ -198,7 +228,9 @@ class Pipeline:
             format_instructions=self.accounting_format_instructions,
             report=state["markdown_result"],
         )
-        parsed = self._call_llm_and_parse(messages, self.accounting_output_parser, self.accounting_format_instructions)
+        parsed = self._call_llm_and_parse(
+            messages, self.accounting_output_parser, self.accounting_format_instructions
+        )
         data = parsed.model_dump(by_alias=True)
         result = enrich_json(data)
         json_str = json.dumps(result, ensure_ascii=False, indent=2)
@@ -210,18 +242,24 @@ class Pipeline:
             format_instructions=self.official_format_instructions,
             report=state["markdown_result"],
         )
-        parsed = self._call_llm_and_parse(messages, self.official_output_parser, self.official_format_instructions)
+        parsed = self._call_llm_and_parse(
+            messages, self.official_output_parser, self.official_format_instructions
+        )
         data = parsed.model_dump(by_alias=True)
         json_str = json.dumps(data, ensure_ascii=False, indent=2)
         return {"response": f"```json\n{json_str}\n```"}
 
     def _other_node(self, _state: Doc2JSONState) -> dict:
         """Узел «прочее»: документ не относится к бухотчётности и не к официальным запросам."""
-        return {"response": "Документ не относится к Бухгалтерской отчетности или официальным запросам"}
+        return {
+            "response": "Документ не относится к Бухгалтерской отчетности или официальным запросам"
+        }
 
     def _route_after_router(self, state: Doc2JSONState) -> str:
         """Условный переход после роутера: имя следующего узла."""
-        return state.get("route") or "other"
+        next_node = state.get("route") or "other"
+        logger.info("Роутер: выбран узел '%s'", next_node)
+        return next_node
 
     def _build_graph(self):
         """Собирает LangGraph: START → router → accounting | official_request | other → END."""
@@ -259,7 +297,12 @@ class Pipeline:
             self._file_cache[user_id][chat_id] = set()
 
         files = body.get("files", []) or []
-        pdf_files = [f for f in files if (f.get("file") or {}).get("meta", {}).get("content_type") == "application/pdf"]
+        pdf_files = [
+            f
+            for f in files
+            if (f.get("file") or {}).get("meta", {}).get("content_type")
+            == "application/pdf"
+        ]
         file_list_all = [
             {
                 "url": f["url"],
@@ -270,8 +313,18 @@ class Pipeline:
             if f.get("url")
         ]
 
+        if file_list_all:
+            names_all = [f["name"] for f in file_list_all]
+            logger.info("Inlet: получены файлы: %s", names_all)
+
         cached_urls = self._file_cache[user_id][chat_id]
         file_list_new = [f for f in file_list_all if f["url"] not in cached_urls]
+
+        if file_list_new:
+            names_new = [f["name"] for f in file_list_new]
+            logger.info("Inlet: новые файлы: %s", names_new)
+        elif file_list_all:
+            logger.info("Inlet: все файлы уже в кэше, новых нет")
 
         body["_doc2json_pdf_paths"] = []
         body["_doc2json_all_cached"] = bool(file_list_all and not file_list_new)
@@ -290,7 +343,14 @@ class Pipeline:
 
     async def outlet(self, body: dict, user: Optional[dict] = None) -> dict:
         """Удаляет оставшиеся временные PDF."""
-        for p in body.get("_doc2json_pdf_paths") or []:
+        temp_paths = body.get("_doc2json_pdf_paths") or []
+        if temp_paths:
+            logger.info(
+                "Outlet: очистка временной папки, удаление %d файл(ов): %s",
+                len(temp_paths),
+                [os.path.basename(p) for p in temp_paths],
+            )
+        for p in temp_paths:
             Path(p).unlink(missing_ok=True)
         body.pop("_doc2json_pdf_paths", None)
         body.pop("_doc2json_all_cached", None)
@@ -324,8 +384,16 @@ class Pipeline:
 
             final_markdown = self.paddle.concatenate_markdown_pages(all_markdown_list)
             markdown_result = html_to_markdown_with_tables(final_markdown)
-            markdown_result = truncate_after_diluted_eps(remove_parentheses_around_numbers(markdown_result))
+            markdown_result = truncate_after_diluted_eps(
+                remove_parentheses_around_numbers(markdown_result)
+            )
         finally:
+            if temp_paths:
+                logger.info(
+                    "Pipe: очистка временных файлов после обработки (%d шт.): %s",
+                    len(temp_paths),
+                    [os.path.basename(p) for p in temp_paths],
+                )
             for p in temp_paths:
                 Path(p).unlink(missing_ok=True)
 
