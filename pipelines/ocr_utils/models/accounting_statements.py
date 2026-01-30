@@ -12,12 +12,8 @@ from pydantic import BaseModel, Field
 
 
 class BalanceHeadTable(BaseModel):
-    organization: Optional[str] = Field(
-        None, alias="Организация", description="Название организации"
-    )
-    taxpayer_id: Optional[int] = Field(
-        None, alias="Учетный номер плательщика", description="Учетный номер плательщика"
-    )
+    organization: Optional[str] = Field(None, alias="Организация", description="Название организации")
+    taxpayer_id: Optional[int] = Field(None, alias="Учетный номер плательщика", description="Учетный номер плательщика")
     economic_activity: Optional[str] = Field(
         None,
         alias="Вид экономической деятельности",
@@ -28,12 +24,8 @@ class BalanceHeadTable(BaseModel):
         alias="Организационно-правовая форма",
         description="Организационно-правовая форма",
     )
-    governing_body: Optional[str] = Field(
-        None, alias="Орган управления", description="Орган управления"
-    )
-    unit: Optional[str] = Field(
-        None, alias="Единица измерения", description="Единица измерения"
-    )
+    governing_body: Optional[str] = Field(None, alias="Орган управления", description="Орган управления")
+    unit: Optional[str] = Field(None, alias="Единица измерения", description="Единица измерения")
     address: Optional[str] = Field(None, alias="Адрес", description="Адрес")
 
 
@@ -43,12 +35,8 @@ class BalanceDatesTable(BaseModel):
         alias="Дата утверждения",
         description="Дата утверждения в формате ДД.ММ.ГГГГ",
     )
-    submission_date: Optional[str] = Field(
-        None, alias="Дата отправки", description="Дата отправки в формате ДД.ММ.ГГГГ"
-    )
-    acceptance_date: Optional[str] = Field(
-        None, alias="Дата принятия", description="Дата принятия в формате ДД.ММ.ГГГГ"
-    )
+    submission_date: Optional[str] = Field(None, alias="Дата отправки", description="Дата отправки в формате ДД.ММ.ГГГГ")
+    acceptance_date: Optional[str] = Field(None, alias="Дата принятия", description="Дата принятия в формате ДД.ММ.ГГГГ")
 
 
 class BalanceMainTable(BaseModel):
@@ -749,7 +737,7 @@ class ReportMainTable(BaseModel):
 
 
 # ============================================================================
-# Агрегация: ParsedPDF
+# Агрегация: AccountingStatements
 # ============================================================================
 
 
