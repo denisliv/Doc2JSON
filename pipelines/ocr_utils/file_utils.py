@@ -49,17 +49,31 @@ async def download_pdf_to_temp_path(
         Путь к временному файлу
 
     Raises:
-        Exception: Если загрузка не удалась или не удалось записать файл
+        ValueError: Если url или filename_hint некорректны
+        OSError: Если не удалось создать или записать временный файл
+        Exception: Если загрузка не удалась
     """
+    if not url:
+        raise ValueError("URL cannot be empty")
+
     content = await download_file(url, headers)
     suffix = Path(filename_hint).suffix or ".pdf"
-    fd, path = tempfile.mkstemp(suffix=suffix)
+    fd = None
+    path = None
     try:
+        fd, path = tempfile.mkstemp(suffix=suffix)
         with open(fd, "wb") as f:
             f.write(content)
         return path
-    except Exception:
-        Path(path).unlink(missing_ok=True)
+    except OSError as e:
+        logger.error(f"Failed to create/write temp file: {e}")
+        if path:
+            Path(path).unlink(missing_ok=True)
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in download_pdf_to_temp_path: {e}")
+        if path:
+            Path(path).unlink(missing_ok=True)
         raise
 
 

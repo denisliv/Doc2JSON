@@ -11,7 +11,13 @@ REQUIRED_TABLES_KEYS = [
 
 
 def enrich_json(input_json_str):
-    """Добавляет к ответу LLM поля message (OK/Missing по ключам) и xlsx=None."""
+    """Добавляет к ответу LLM поля message (OK/Missing по ключам)
+
+    Args:
+        text: Исходный JSON
+    Returns:
+        Исходный JSON c ключами message, xlsx.
+    """
     if isinstance(input_json_str, str):
         data = json.loads(input_json_str)
     else:
@@ -47,7 +53,8 @@ def remove_parentheses_around_numbers(text: str) -> str:
 
 def truncate_after_diluted_eps(markdown: str) -> str:
     """
-    Временное решение для обрезки markdown после строки «Разводненная прибыль (убыток) на акцию | 260 |».
+    Обрезки markdown после строки «Разводненная прибыль (убыток) на акцию | 260 |».
+    Необходимо, если исходный pdf содержит больше таблиц, чем нужно для отчета
 
     Args:
         markdown: Исходная строка в формате Markdown
